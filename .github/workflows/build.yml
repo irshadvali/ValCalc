@@ -1,5 +1,5 @@
 
-name: ValiCalc Android and iOS Builds
+name: ValiCalc Android Builds
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    name: Build APK, AAB and IPA
+    name: Build Android APK and AAB
     runs-on: ubuntu-latest
 
     steps:
@@ -38,6 +38,3 @@ jobs:
 
       - name: Build Android AAB
         run: eas build --platform android --profile production --non-interactive --no-wait
-
-      - name: Build iOS IPA
-        run: eas build --platform ios --profile production --non-interactive --no-wait
