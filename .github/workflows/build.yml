@@ -1,40 +1,39 @@
 
-name: ValiCalc Android Builds
+name: Android Build and Google Play Upload
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
-  build:
-    name: Build Android APK and AAB
+  build-and-upload:
+    name: Build AAB and Upload to Play Store
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout project
-        uses: actions/checkout@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 20
           cache: npm
-
-      - name: Setup Expo
-        uses: expo/expo-github-action@v9
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-          packager: npm
-          eas-cache: false
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Android APK
-        run: eas build --platform android --profile preview --non-interactive --no-wait
+      - name: Install EAS CLI
+        run: npm install -g eas-cli
 
-      - name: Build Android AAB
-        run: eas build --platform android --profile production --non-interactive --no-wait
+      - name: Build and submit to Google Play
+        run: |
+          eas build \
+            --platform android \
+            --profile production \
+            --auto-submit \
+            --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
