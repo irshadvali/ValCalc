@@ -1,16 +1,16 @@
 {
   "expo": {
-    "name": "Simple Calculator",
-    "slug": "simple-calculator",
+    "name": "Simple Vali Calculator",
+    "slug": "simple-vali-calculator",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "android": {
-      "package": "com.example.simplecalculator"
+      "package": "com.irshadvali.valcalc"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.example.simplecalculator"
+      "bundleIdentifier": "com.irshadvali.valcalc"
     },
     "plugins": [
       "expo-status-bar"
