@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "Simple Calculator",
+    "slug": "simple-calculator",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "package": "com.example.simplecalculator"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.example.simplecalculator"
+    },
+    "plugins": [
+      "expo-status-bar"
+    ]
+  }
+}
