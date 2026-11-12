@@ -53,7 +53,8 @@ release {
     def uploadKeyAlias = project.findProperty("MYAPP_UPLOAD_KEY_ALIAS")
     def uploadKeyPassword = project.findProperty("MYAPP_UPLOAD_KEY_PASSWORD")
 
-    if (!uploadStoreFile || !uploadStorePassword || !uploadKeyAlias || !uploadKeyPassword) {
+    if (!uploadStoreFile || !uploadStorePassword ||
+        !uploadKeyAlias || !uploadKeyPassword) {
         throw new GradleException(
             "Android release signing properties are missing."
         )
