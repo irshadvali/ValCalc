@@ -1,10 +1,11 @@
-
+```yaml
 name: Android Build and Google Play Upload
 
 on:
   push:
     branches:
       - main
+
   workflow_dispatch:
 
 permissions:
@@ -16,36 +17,46 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
+      # 3. Setup Java
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
+      # 4. Install dependencies
       - name: Install dependencies
         run: npm ci
 
+      # 5. Validate Expo configuration
       - name: Validate Expo configuration
         run: |
           node --version
+          npm --version
           npx expo config --type public --json
           npx expo-modules-autolinking resolve --platform android
 
+      # 6. Generate Android project if missing
       - name: Generate Android project if missing
         run: |
           if [ ! -d android ]; then
             npx expo prebuild --platform android --no-install
+          else
+            echo "Android project already exists."
           fi
 
+      # 7. Configure Android signing
       - name: Configure Android signing
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -55,17 +66,35 @@ jobs:
         run: |
           set -euo pipefail
 
-          test -n "$KEYSTORE"
-          test -n "$STORE_PASSWORD"
-          test -n "$KEY_ALIAS"
-          test -n "$KEY_PASSWORD"
+          if [ -z "$KEYSTORE" ]; then
+            echo "ERROR: ANDROID_KEYSTORE_BASE64 is missing"
+            exit 1
+          fi
+
+          if [ -z "$STORE_PASSWORD" ]; then
+            echo "ERROR: ANDROID_KEYSTORE_PASSWORD is missing"
+            exit 1
+          fi
+
+          if [ -z "$KEY_ALIAS" ]; then
+            echo "ERROR: ANDROID_KEY_ALIAS is missing"
+            exit 1
+          fi
+
+          if [ -z "$KEY_PASSWORD" ]; then
+            echo "ERROR: ANDROID_KEY_PASSWORD is missing"
+            exit 1
+          fi
 
           mkdir -p android/app
 
           printf '%s' "$KEYSTORE" | base64 --decode \
             > android/app/upload-keystore.jks
 
-          test -s android/app/upload-keystore.jks
+          if [ ! -s android/app/upload-keystore.jks ]; then
+            echo "ERROR: Keystore decoding failed"
+            exit 1
+          fi
 
           {
             echo "MYAPP_UPLOAD_STORE_FILE=upload-keystore.jks"
@@ -76,25 +105,63 @@ jobs:
 
           echo "Android signing properties configured."
 
+      # 8. Verify Android signing
       - name: Verify Android signing
         working-directory: android
         run: |
-          grep -q '^MYAPP_UPLOAD_STORE_FILE=' gradle.properties
-          grep -q '^MYAPP_UPLOAD_KEY_ALIAS=' gradle.properties
-          test -s app/upload-keystore.jks
-          echo "Signing configuration verified."
+          set -u
 
+          echo "Checking android/gradle.properties..."
+
+          if [ ! -f gradle.properties ]; then
+            echo "ERROR: android/gradle.properties not found"
+            exit 1
+          fi
+
+          if grep -q '^MYAPP_UPLOAD_STORE_FILE=' gradle.properties; then
+            echo "OK: STORE_FILE property exists"
+          else
+            echo "ERROR: STORE_FILE property missing"
+            exit 1
+          fi
+
+          if grep -q '^MYAPP_UPLOAD_KEY_ALIAS=' gradle.properties; then
+            echo "OK: KEY_ALIAS property exists"
+          else
+            echo "ERROR: KEY_ALIAS property missing"
+            exit 1
+          fi
+
+          if [ -s app/upload-keystore.jks ]; then
+            echo "OK: Keystore file exists"
+          else
+            echo "ERROR: Keystore file missing or empty"
+            exit 1
+          fi
+
+          echo "Android signing configuration verified."
+
+      # 9. Build Android AAB
       - name: Build Android AAB
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew :app:bundleRelease
 
+      # 10. Verify generated AAB
       - name: Verify generated AAB
         run: |
-          test -s android/app/build/outputs/bundle/release/app-release.aab
-          ls -lh android/app/build/outputs/bundle/release/app-release.aab
+          AAB_FILE="android/app/build/outputs/bundle/release/app-release.aab"
 
+          if [ ! -s "$AAB_FILE" ]; then
+            echo "ERROR: AAB file not generated"
+            exit 1
+          fi
+
+          echo "AAB generated successfully:"
+          ls -lh "$AAB_FILE"
+
+      # 11. Save AAB as GitHub artifact
       - name: Save AAB artifact
         uses: actions/upload-artifact@v4
         with:
@@ -103,6 +170,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # 12. Upload AAB to Google Play Internal testing
       - name: Upload AAB to Google Play
         uses: r0adkll/upload-google-play@v1
         with:
