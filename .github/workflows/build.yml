@@ -7,6 +7,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build-and-upload:
     name: Build AAB and Upload to Play Store
@@ -50,34 +53,55 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          set -e
+          set -euo pipefail
 
           test -n "$KEYSTORE"
           test -n "$STORE_PASSWORD"
           test -n "$KEY_ALIAS"
           test -n "$KEY_PASSWORD"
 
+          mkdir -p android/app
+
           printf '%s' "$KEYSTORE" | base64 --decode \
             > android/app/upload-keystore.jks
 
-          cat >> android/gradle.properties <<EOF
-          MYAPP_UPLOAD_STORE_FILE=upload-keystore.jks
-          MYAPP_UPLOAD_KEY_ALIAS=$KEY_ALIAS
-          MYAPP_UPLOAD_STORE_PASSWORD=$STORE_PASSWORD
-          MYAPP_UPLOAD_KEY_PASSWORD=$KEY_PASSWORD
-          EOF
+          test -s android/app/upload-keystore.jks
+
+          {
+            echo "MYAPP_UPLOAD_STORE_FILE=upload-keystore.jks"
+            echo "MYAPP_UPLOAD_KEY_ALIAS=$KEY_ALIAS"
+            echo "MYAPP_UPLOAD_STORE_PASSWORD=$STORE_PASSWORD"
+            echo "MYAPP_UPLOAD_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> android/gradle.properties
+
+          echo "Android signing properties configured."
+
+      - name: Verify Android signing
+        working-directory: android
+        run: |
+          grep -q '^MYAPP_UPLOAD_STORE_FILE=' gradle.properties
+          grep -q '^MYAPP_UPLOAD_KEY_ALIAS=' gradle.properties
+          test -s app/upload-keystore.jks
+          echo "Signing configuration verified."
 
       - name: Build Android AAB
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew app:bundleRelease
+          ./gradlew :app:bundleRelease
 
-      - name: Save AAB
+      - name: Verify generated AAB
+        run: |
+          test -s android/app/build/outputs/bundle/release/app-release.aab
+          ls -lh android/app/build/outputs/bundle/release/app-release.aab
+
+      - name: Save AAB artifact
         uses: actions/upload-artifact@v4
         with:
           name: android-release-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload AAB to Google Play
         uses: r0adkll/upload-google-play@v1
@@ -85,5 +109,5 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           packageName: com.irshadvali.valcalc
           releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
-          tracks: internal
+          track: internal
           status: completed
