@@ -28,160 +28,82 @@ jobs:
           node-version: 22
           cache: npm
 
-      # 3. Setup Java
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      # 4. Install dependencies
+      # 3. Install dependencies
       - name: Install dependencies
         run: npm ci
 
-      # 5. Generate Android project if missing
-      - name: Prepare Android project
-        run: |
-          if [ ! -d android ]; then
-            npx expo prebuild --platform android --no-install
-          fi
+      # 4. Install EAS CLI
+      - name: Install EAS CLI
+        run: npm install --global eas-cli
 
-          test -f android/gradlew
-          test -f android/app/build.gradle
-          echo "Android project ready."
-
-      # 6. Configure Android signing
-      - name: Configure Android signing
+      # 5. Authenticate with Expo
+      - name: Expo Login
         env:
-          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          set -euo pipefail
-
-          echo "Project directory:"
-          pwd
-
-          # Validate secrets
-          test -n "$KEYSTORE" || {
-            echo "ERROR: ANDROID_KEYSTORE_BASE64 is missing"
-            exit 1
-          }
-
-          test -n "$STORE_PASSWORD" || {
-            echo "ERROR: ANDROID_KEYSTORE_PASSWORD is missing"
-            exit 1
-          }
-
-          test -n "$KEY_ALIAS" || {
-            echo "ERROR: ANDROID_KEY_ALIAS is missing"
-            exit 1
-          }
-
-          test -n "$KEY_PASSWORD" || {
-            echo "ERROR: ANDROID_KEY_PASSWORD is missing"
-            exit 1
-          }
-
-          # Create keystore in android/app
-          mkdir -p android/app
-
-          printf '%s' "$KEYSTORE" |
-            base64 --decode > android/app/upload-keystore.jks
-
-          test -s android/app/upload-keystore.jks
-
-          # Validate keystore and alias
-          keytool -list \
-            -keystore android/app/upload-keystore.jks \
-            -storepass "$STORE_PASSWORD" \
-            -alias "$KEY_ALIAS" > /dev/null
-
-          echo "Keystore successfully decoded and verified."
-
-          # Create/update Android root Gradle properties
-          touch android/gradle.properties
-
-          sed -i '/^MYAPP_UPLOAD_STORE_FILE=/d' android/gradle.properties
-          sed -i '/^MYAPP_UPLOAD_STORE_PASSWORD=/d' android/gradle.properties
-          sed -i '/^MYAPP_UPLOAD_KEY_ALIAS=/d' android/gradle.properties
-          sed -i '/^MYAPP_UPLOAD_KEY_PASSWORD=/d' android/gradle.properties
-
-          {
-            echo "MYAPP_UPLOAD_STORE_FILE=upload-keystore.jks"
-            echo "MYAPP_UPLOAD_STORE_PASSWORD=$STORE_PASSWORD"
-            echo "MYAPP_UPLOAD_KEY_ALIAS=$KEY_ALIAS"
-            echo "MYAPP_UPLOAD_KEY_PASSWORD=$KEY_PASSWORD"
-          } >> android/gradle.properties
-
-          echo "Android signing properties configured."
-
-      # 7. Verify Android signing
-      - name: Verify Android signing
-        run: |
-          set -euo pipefail
-
-          echo "Checking android/gradle.properties..."
-
-          test -f android/gradle.properties
-
-          grep -q '^MYAPP_UPLOAD_STORE_FILE=upload-keystore.jks$' \
-            android/gradle.properties
-
-          grep -q '^MYAPP_UPLOAD_STORE_PASSWORD=' \
-            android/gradle.properties
-
-          grep -q '^MYAPP_UPLOAD_KEY_ALIAS=' \
-            android/gradle.properties
-
-          grep -q '^MYAPP_UPLOAD_KEY_PASSWORD=' \
-            android/gradle.properties
-
-          test -s android/app/upload-keystore.jks
-
-          echo "OK: STORE_FILE property exists"
-          echo "OK: STORE_PASSWORD property exists"
-          echo "OK: KEY_ALIAS property exists"
-          echo "OK: KEY_PASSWORD property exists"
-          echo "OK: Keystore file exists"
-          echo "Android signing verification successful."
-
-      # 8. Build release AAB
-      - name: Build Android AAB
-        working-directory: android
-        run: |
-          chmod +x gradlew
-          ./gradlew :app:bundleRelease
-
-      # 9. Verify AAB
-      - name: Verify generated AAB
-        run: |
-          AAB="android/app/build/outputs/bundle/release/app-release.aab"
-
-          if [ ! -s "$AAB" ]; then
-            echo "ERROR: AAB file not generated"
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "ERROR: EXPO_TOKEN secret is missing"
             exit 1
           fi
 
-          ls -lh "$AAB"
-          echo "AAB generated successfully."
+          eas whoami
 
-      # 10. Save AAB artifact
+      # 6. Build Android AAB using EAS
+      - name: Build Android AAB
+        run: |
+          eas build \
+            --platform android \
+            --profile production \
+            --non-interactive \
+            --wait
+
+      # 7. Download generated AAB
+      - name: Download Android AAB
+        run: |
+          mkdir -p artifacts
+
+          eas build:list \
+            --platform android \
+            --status finished \
+            --limit 1 \
+            --json \
+            --non-interactive > artifacts/build-list.json
+
+          BUILD_ID=$(node -e "
+            const builds = require('./artifacts/build-list.json');
+            if (!builds.length || !builds[0].artifacts?.applicationArchiveUrl) {
+              throw new Error('No completed Android AAB build found');
+            }
+            console.log(builds[0].id);
+          ")
+
+          AAB_URL=$(node -e "
+            const builds = require('./artifacts/build-list.json');
+            console.log(builds[0].artifacts.applicationArchiveUrl);
+          ")
+
+          curl -fL "$AAB_URL" -o artifacts/app-release.aab
+
+          test -s artifacts/app-release.aab
+
+          echo "Downloaded build: $BUILD_ID"
+          ls -lh artifacts/app-release.aab
+
+      # 8. Save AAB artifact
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
         with:
           name: android-release-aab
-          path: android/app/build/outputs/bundle/release/app-release.aab
+          path: artifacts/app-release.aab
           if-no-files-found: error
           retention-days: 14
 
-      # 11. Upload to Google Play Internal testing
+      # 9. Upload to Google Play Internal Testing
       - name: Upload to Google Play
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           packageName: com.irshadvali.valcalc
-          releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
+          releaseFiles: artifacts/app-release.aab
           track: internal
           status: completed
