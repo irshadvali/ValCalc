@@ -47,7 +47,6 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
-
 release {
     def uploadStoreFile = project.findProperty("MYAPP_UPLOAD_STORE_FILE")
     def uploadStorePassword = project.findProperty("MYAPP_UPLOAD_STORE_PASSWORD")
@@ -56,7 +55,9 @@ release {
 
     if (!uploadStoreFile || !uploadStorePassword ||
         !uploadKeyAlias || !uploadKeyPassword) {
-        throw new GradleException("Android release signing properties are missing.")
+        throw new GradleException(
+            "Android release signing properties are missing."
+        )
     }
 
     storeFile file(uploadStoreFile)
@@ -64,7 +65,6 @@ release {
     keyAlias uploadKeyAlias
     keyPassword uploadKeyPassword
 }
-
     }
 
     buildTypes {
