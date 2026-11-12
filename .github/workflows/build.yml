@@ -1,15 +1,19 @@
 
-name: Android Build and Google Play Deployment
+name: Android Build and Google Play Upload
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
 
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
-  build:
-    name: Build Android AAB and Upload to Play Store
+  android-build:
+    name: Build Android AAB and Upload to Google Play
     runs-on: ubuntu-latest
 
     steps:
@@ -25,26 +29,29 @@ jobs:
           cache: npm
 
       # 3. Setup Java
-      - name: Setup Java 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: 17
 
-      # 4. Install npm dependencies
+      # 4. Install dependencies
       - name: Install dependencies
         run: npm ci
 
       # 5. Generate Android project if missing
-      - name: Generate Android project
+      - name: Prepare Android project
         run: |
-          if [ ! -f android/gradlew ]; then
+          if [ ! -d android ]; then
             npx expo prebuild --platform android --no-install
           fi
 
+          test -f android/gradlew
+          test -f android/app/build.gradle
+          echo "Android project ready."
+
       # 6. Configure Android signing
-      - name: Configure and Verify Android Signing
-        shell: bash
+      - name: Configure Android signing
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -53,127 +60,124 @@ jobs:
         run: |
           set -euo pipefail
 
-          ANDROID_DIR="$GITHUB_WORKSPACE/android"
-          PROPERTIES="$ANDROID_DIR/gradle.properties"
-          KEYSTORE_FILE="$ANDROID_DIR/app/upload-keystore.jks"
+          echo "Project directory:"
+          pwd
 
-          echo "Checking Android project..."
-
-          if [[ ! -d "$ANDROID_DIR" ]]; then
-            echo "ERROR: android directory not found."
-            exit 1
-          fi
-
-          if [[ ! -f "$ANDROID_DIR/app/build.gradle" ]]; then
-            echo "ERROR: android/app/build.gradle not found."
-            exit 1
-          fi
-
-          # Validate GitHub Secrets
-          [[ -n "$KEYSTORE" ]] || {
-            echo "ERROR: ANDROID_KEYSTORE_BASE64 secret is empty."
+          # Validate secrets
+          test -n "$KEYSTORE" || {
+            echo "ERROR: ANDROID_KEYSTORE_BASE64 is missing"
             exit 1
           }
 
-          [[ -n "$STORE_PASSWORD" ]] || {
-            echo "ERROR: ANDROID_KEYSTORE_PASSWORD secret is empty."
+          test -n "$STORE_PASSWORD" || {
+            echo "ERROR: ANDROID_KEYSTORE_PASSWORD is missing"
             exit 1
           }
 
-          [[ -n "$KEY_ALIAS" ]] || {
-            echo "ERROR: ANDROID_KEY_ALIAS secret is empty."
+          test -n "$KEY_ALIAS" || {
+            echo "ERROR: ANDROID_KEY_ALIAS is missing"
             exit 1
           }
 
-          [[ -n "$KEY_PASSWORD" ]] || {
-            echo "ERROR: ANDROID_KEY_PASSWORD secret is empty."
+          test -n "$KEY_PASSWORD" || {
+            echo "ERROR: ANDROID_KEY_PASSWORD is missing"
             exit 1
           }
 
-          mkdir -p "$ANDROID_DIR/app"
-          touch "$PROPERTIES"
+          # Create keystore in android/app
+          mkdir -p android/app
 
-          # Decode keystore
-          echo "Decoding Android keystore..."
+          printf '%s' "$KEYSTORE" |
+            base64 --decode > android/app/upload-keystore.jks
 
-          if ! printf '%s' "$KEYSTORE" | base64 --decode > "$KEYSTORE_FILE"; then
-            echo "ERROR: Base64 decoding failed."
-            exit 1
-          fi
+          test -s android/app/upload-keystore.jks
 
-          if [[ ! -s "$KEYSTORE_FILE" ]]; then
-            echo "ERROR: Keystore file is empty."
-            exit 1
-          fi
-
-          # Validate keystore
-          echo "Validating keystore..."
-
-          if ! keytool -list \
-            -keystore "$KEYSTORE_FILE" \
+          # Validate keystore and alias
+          keytool -list \
+            -keystore android/app/upload-keystore.jks \
             -storepass "$STORE_PASSWORD" \
-            -alias "$KEY_ALIAS" > /dev/null 2>&1; then
-            echo "ERROR: Invalid keystore password or alias."
-            exit 1
-          fi
+            -alias "$KEY_ALIAS" > /dev/null
 
-          # Remove old signing properties
-          sed -i \
-            -e '/^MYAPP_UPLOAD_STORE_FILE=/d' \
-            -e '/^MYAPP_UPLOAD_STORE_PASSWORD=/d' \
-            -e '/^MYAPP_UPLOAD_KEY_ALIAS=/d' \
-            -e '/^MYAPP_UPLOAD_KEY_PASSWORD=/d' \
-            "$PROPERTIES"
+          echo "Keystore successfully decoded and verified."
 
-          # Write signing properties
+          # Create/update Android root Gradle properties
+          touch android/gradle.properties
+
+          sed -i '/^MYAPP_UPLOAD_STORE_FILE=/d' android/gradle.properties
+          sed -i '/^MYAPP_UPLOAD_STORE_PASSWORD=/d' android/gradle.properties
+          sed -i '/^MYAPP_UPLOAD_KEY_ALIAS=/d' android/gradle.properties
+          sed -i '/^MYAPP_UPLOAD_KEY_PASSWORD=/d' android/gradle.properties
+
           {
             echo "MYAPP_UPLOAD_STORE_FILE=upload-keystore.jks"
             echo "MYAPP_UPLOAD_STORE_PASSWORD=$STORE_PASSWORD"
             echo "MYAPP_UPLOAD_KEY_ALIAS=$KEY_ALIAS"
             echo "MYAPP_UPLOAD_KEY_PASSWORD=$KEY_PASSWORD"
-          } >> "$PROPERTIES"
+          } >> android/gradle.properties
 
-          # Verify properties
-          grep -q '^MYAPP_UPLOAD_STORE_FILE=upload-keystore.jks$' "$PROPERTIES" || {
-            echo "ERROR: STORE_FILE property missing."
-            exit 1
-          }
+          echo "Android signing properties configured."
 
-          grep -q '^MYAPP_UPLOAD_STORE_PASSWORD=.' "$PROPERTIES" || {
-            echo "ERROR: STORE_PASSWORD property missing."
-            exit 1
-          }
+      # 7. Verify Android signing
+      - name: Verify Android signing
+        run: |
+          set -euo pipefail
 
-          grep -q '^MYAPP_UPLOAD_KEY_ALIAS=.' "$PROPERTIES" || {
-            echo "ERROR: KEY_ALIAS property missing."
-            exit 1
-          }
+          echo "Checking android/gradle.properties..."
 
-          grep -q '^MYAPP_UPLOAD_KEY_PASSWORD=.' "$PROPERTIES" || {
-            echo "ERROR: KEY_PASSWORD property missing."
-            exit 1
-          }
+          test -f android/gradle.properties
 
-          echo "SUCCESS: Android signing configured and verified."
+          grep -q '^MYAPP_UPLOAD_STORE_FILE=upload-keystore.jks$' \
+            android/gradle.properties
 
-      # 7. Build Android AAB
+          grep -q '^MYAPP_UPLOAD_STORE_PASSWORD=' \
+            android/gradle.properties
+
+          grep -q '^MYAPP_UPLOAD_KEY_ALIAS=' \
+            android/gradle.properties
+
+          grep -q '^MYAPP_UPLOAD_KEY_PASSWORD=' \
+            android/gradle.properties
+
+          test -s android/app/upload-keystore.jks
+
+          echo "OK: STORE_FILE property exists"
+          echo "OK: STORE_PASSWORD property exists"
+          echo "OK: KEY_ALIAS property exists"
+          echo "OK: KEY_PASSWORD property exists"
+          echo "OK: Keystore file exists"
+          echo "Android signing verification successful."
+
+      # 8. Build release AAB
       - name: Build Android AAB
         working-directory: android
-        shell: bash
         run: |
           chmod +x gradlew
           ./gradlew :app:bundleRelease
 
-      # 8. Upload AAB as GitHub artifact
+      # 9. Verify AAB
+      - name: Verify generated AAB
+        run: |
+          AAB="android/app/build/outputs/bundle/release/app-release.aab"
+
+          if [ ! -s "$AAB" ]; then
+            echo "ERROR: AAB file not generated"
+            exit 1
+          fi
+
+          ls -lh "$AAB"
+          echo "AAB generated successfully."
+
+      # 10. Save AAB artifact
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
         with:
           name: android-release-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
+          retention-days: 14
 
-      # 9. Upload AAB directly to Google Play
-      - name: Upload to Google Play Internal Testing
+      # 11. Upload to Google Play Internal testing
+      - name: Upload to Google Play
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
