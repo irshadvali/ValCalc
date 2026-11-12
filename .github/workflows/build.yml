@@ -1,4 +1,4 @@
-```yaml
+
 name: Android Build and Google Play Upload
 
 on:
