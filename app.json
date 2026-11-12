@@ -6,7 +6,8 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "android": {
-      "package": "com.irshadvali.valcalc"
+      "package": "com.irshadvali.valcalc",
+      "versionCode": 1
     },
     "ios": {
       "supportsTablet": true,

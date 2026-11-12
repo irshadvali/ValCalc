@@ -22,18 +22,60 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Install EAS CLI
-        run: npm install -g eas-cli
-
-      - name: Build and submit to Google Play
+      # Generate Android native project if not committed
+      - name: Generate Android project
         run: |
-          eas build \
-            --platform android \
-            --profile production \
-            --auto-submit \
-            --non-interactive
+          if [ ! -d android ]; then
+            npx expo prebuild --platform android --no-install
+          fi
+
+      - name: Configure Android signing
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE" | base64 --decode \
+            > android/app/upload-keystore.jks
+
+          cat >> android/gradle.properties <<EOF
+          MYAPP_UPLOAD_STORE_FILE=upload-keystore.jks
+          MYAPP_UPLOAD_KEY_ALIAS=$KEY_ALIAS
+          MYAPP_UPLOAD_STORE_PASSWORD=$STORE_PASSWORD
+          MYAPP_UPLOAD_KEY_PASSWORD=$KEY_PASSWORD
+          EOF
+
+      - name: Build AAB and APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew app:bundleRelease app:assembleRelease
+
+      # Save AAB and APK in GitHub Actions
+      - name: Save build files
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-files
+          path: |
+            android/app/build/outputs/bundle/release/app-release.aab
+            android/app/build/outputs/apk/release/app-release.apk
+
+      # Upload AAB directly to Google Play
+      - name: Upload AAB to Google Play
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          packageName: com.irshadvali.myexpoapp
+          releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
+          tracks: internal
+          status: completed
