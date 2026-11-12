@@ -8,6 +8,7 @@ import {
   StatusBar,
 } from 'react-native';
 
+
 const rows = [
   ['AC', '⌫', '%', '÷'],
   ['7', '8', '9', '×'],
