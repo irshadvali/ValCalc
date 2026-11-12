@@ -19,7 +19,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Setup Java
@@ -31,8 +31,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Generate Android native project if not committed
-      - name: Generate Android project
+      - name: Validate Expo configuration
+        run: |
+          node --version
+          npx expo config --type public --json
+          npx expo-modules-autolinking resolve --platform android
+
+      - name: Generate Android project if missing
         run: |
           if [ ! -d android ]; then
             npx expo prebuild --platform android --no-install
@@ -45,7 +50,14 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          echo "$KEYSTORE" | base64 --decode \
+          set -e
+
+          test -n "$KEYSTORE"
+          test -n "$STORE_PASSWORD"
+          test -n "$KEY_ALIAS"
+          test -n "$KEY_PASSWORD"
+
+          printf '%s' "$KEYSTORE" | base64 --decode \
             > android/app/upload-keystore.jks
 
           cat >> android/gradle.properties <<EOF
@@ -55,27 +67,23 @@ jobs:
           MYAPP_UPLOAD_KEY_PASSWORD=$KEY_PASSWORD
           EOF
 
-      - name: Build AAB and APK
+      - name: Build Android AAB
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew app:bundleRelease app:assembleRelease
+          ./gradlew app:bundleRelease
 
-      # Save AAB and APK in GitHub Actions
-      - name: Save build files
+      - name: Save AAB
         uses: actions/upload-artifact@v4
         with:
-          name: android-release-files
-          path: |
-            android/app/build/outputs/bundle/release/app-release.aab
-            android/app/build/outputs/apk/release/app-release.apk
+          name: android-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
 
-      # Upload AAB directly to Google Play
       - name: Upload AAB to Google Play
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          packageName: com.irshadvali.myexpoapp
+          packageName: com.irshadvali.valcalc
           releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
           tracks: internal
           status: completed
