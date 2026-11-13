@@ -25,85 +25,239 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
           cache: npm
 
-      # 3. Install dependencies
+      # 3. Setup Java
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # 4. Install dependencies
       - name: Install dependencies
         run: npm ci
 
-      # 4. Install EAS CLI
-      - name: Install EAS CLI
-        run: npm install --global eas-cli
-
-      # 5. Authenticate with Expo
-      - name: Expo Login
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      # 5. Generate Android project if missing
+      - name: Prepare Android project
         run: |
-          if [ -z "$EXPO_TOKEN" ]; then
-            echo "ERROR: EXPO_TOKEN secret is missing"
+          set -euo pipefail
+
+          if [ ! -d android ]; then
+            echo "Generating Android project using Expo Prebuild..."
+
+            npx expo prebuild \
+              --platform android \
+              --no-install
+          fi
+
+          test -f android/gradlew
+          test -f android/app/build.gradle
+
+          echo "Android project ready."
+
+      # 6. Configure Android signing
+      - name: Configure Android signing
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          # Validate secrets
+          test -n "$KEYSTORE" || {
+            echo "ERROR: ANDROID_KEYSTORE_BASE64 missing"
+            exit 1
+          }
+
+          test -n "$STORE_PASSWORD" || {
+            echo "ERROR: ANDROID_KEYSTORE_PASSWORD missing"
+            exit 1
+          }
+
+          test -n "$KEY_ALIAS" || {
+            echo "ERROR: ANDROID_KEY_ALIAS missing"
+            exit 1
+          }
+
+          test -n "$KEY_PASSWORD" || {
+            echo "ERROR: ANDROID_KEY_PASSWORD missing"
+            exit 1
+          }
+
+          # Decode upload keystore
+          mkdir -p android/app
+
+          printf '%s' "$KEYSTORE" |
+            base64 --decode > android/app/upload-keystore.jks
+
+          test -s android/app/upload-keystore.jks
+
+          # Verify keystore and alias
+          keytool -list \
+            -keystore android/app/upload-keystore.jks \
+            -storepass "$STORE_PASSWORD" \
+            -alias "$KEY_ALIAS" > /dev/null
+
+          echo "Android keystore verified."
+
+      # 7. Configure release signing
+      - name: Configure release signing
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import re
+          from pathlib import Path
+
+          path = Path("android/app/build.gradle")
+          content = path.read_text()
+
+          # Add custom upload signing configuration
+          if "githubUpload" not in content:
+
+              match = re.search(r'\bbuildTypes\s*\{', content)
+
+              if not match:
+                  raise SystemExit("ERROR: buildTypes block not found")
+
+              signing = """
+              signingConfigs {
+                  githubUpload {
+                      storeFile file(project.property("MYAPP_UPLOAD_STORE_FILE"))
+                      storePassword project.property("MYAPP_UPLOAD_STORE_PASSWORD")
+                      keyAlias project.property("MYAPP_UPLOAD_KEY_ALIAS")
+                      keyPassword project.property("MYAPP_UPLOAD_KEY_PASSWORD")
+                  }
+              }
+
+          """
+
+              content = (
+                  content[:match.start()]
+                  + signing
+                  + content[match.start():]
+              )
+
+          # Find release build type
+          build_types = re.search(r'\bbuildTypes\s*\{', content)
+
+          release = re.search(
+              r'\brelease\s*\{',
+              content[build_types.end():]
+          )
+
+          if not release:
+              raise SystemExit("ERROR: release buildType not found")
+
+          start = build_types.end() + release.start()
+          opening = content.find("{", start)
+
+          depth = 0
+          closing = -1
+
+          for i in range(opening, len(content)):
+              if content[i] == "{":
+                  depth += 1
+              elif content[i] == "}":
+                  depth -= 1
+                  if depth == 0:
+                      closing = i
+                      break
+
+          if closing == -1:
+              raise SystemExit("ERROR: Invalid release block")
+
+          release_body = content[opening + 1:closing]
+
+          # Replace existing release signing configuration
+          release_body = re.sub(
+              r'^\s*signingConfig\s+signingConfigs\.\w+.*$',
+              '            signingConfig signingConfigs.githubUpload',
+              release_body,
+              flags=re.MULTILINE
+          )
+
+          if "signingConfig signingConfigs.githubUpload" not in release_body:
+              release_body = (
+                  '\n            signingConfig signingConfigs.githubUpload\n'
+                  + release_body
+              )
+
+          content = (
+              content[:opening + 1]
+              + release_body
+              + content[closing:]
+          )
+
+          path.write_text(content)
+
+          print("Release signing configured successfully.")
+          PY
+
+      # 8. Verify signing
+      - name: Verify Android signing
+        run: |
+          set -euo pipefail
+
+          test -s android/app/upload-keystore.jks
+
+          grep -q 'githubUpload' android/app/build.gradle
+
+          echo "Keystore exists."
+          echo "Release signing configuration exists."
+
+      # 9. Build Android AAB on GitHub runner
+      - name: Build Android AAB
+        working-directory: android
+        env:
+          ORG_GRADLE_PROJECT_MYAPP_UPLOAD_STORE_FILE: upload-keystore.jks
+          ORG_GRADLE_PROJECT_MYAPP_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_MYAPP_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_MYAPP_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          chmod +x gradlew
+
+          ./gradlew :app:bundleRelease \
+            --no-daemon \
+            --stacktrace
+
+      # 10. Verify AAB
+      - name: Verify generated AAB
+        run: |
+          set -euo pipefail
+
+          AAB="android/app/build/outputs/bundle/release/app-release.aab"
+
+          if [ ! -s "$AAB" ]; then
+            echo "ERROR: AAB not generated"
             exit 1
           fi
 
-          eas whoami
+          ls -lh "$AAB"
 
-      # 6. Build Android AAB using EAS
-      - name: Build Android AAB
-        run: |
-          eas build \
-            --platform android \
-            --profile production \
-            --non-interactive \
-            --wait
+          echo "AAB generated successfully."
 
-      # 7. Download generated AAB
-      - name: Download Android AAB
-        run: |
-          mkdir -p artifacts
-
-          eas build:list \
-            --platform android \
-            --status finished \
-            --limit 1 \
-            --json \
-            --non-interactive > artifacts/build-list.json
-
-          BUILD_ID=$(node -e "
-            const builds = require('./artifacts/build-list.json');
-            if (!builds.length || !builds[0].artifacts?.applicationArchiveUrl) {
-              throw new Error('No completed Android AAB build found');
-            }
-            console.log(builds[0].id);
-          ")
-
-          AAB_URL=$(node -e "
-            const builds = require('./artifacts/build-list.json');
-            console.log(builds[0].artifacts.applicationArchiveUrl);
-          ")
-
-          curl -fL "$AAB_URL" -o artifacts/app-release.aab
-
-          test -s artifacts/app-release.aab
-
-          echo "Downloaded build: $BUILD_ID"
-          ls -lh artifacts/app-release.aab
-
-      # 8. Save AAB artifact
+      # 11. Upload AAB artifact to GitHub
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
         with:
           name: android-release-aab
-          path: artifacts/app-release.aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: 14
 
-      # 9. Upload to Google Play Internal Testing
+      # 12. Upload AAB to Google Play
       - name: Upload to Google Play
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           packageName: com.irshadvali.valcalc
-          releaseFiles: artifacts/app-release.aab
+          releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
           track: internal
           status: completed
