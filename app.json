@@ -2,14 +2,25 @@
   "expo": {
     "name": "Simple Vali Calculator",
     "slug": "simple-vali-calculator",
-    "version": "1.0.3",
+    "icon": "./assets/images/icon.png",
+    "version": "1.0.4",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#003BCE"
+    },
     "android": {
       "package": "com.irshadvali.valcalc",
-      "versionCode": 3
+      "versionCode": 4,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#003BCE"
+      }
     },
     "ios": {
+      "icon": "./assets/images/icon.png",
       "supportsTablet": true,
       "bundleIdentifier": "com.irshadvali.valcalc"
     },
