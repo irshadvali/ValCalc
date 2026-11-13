@@ -2,12 +2,12 @@
   "expo": {
     "name": "Simple Vali Calculator",
     "slug": "simple-vali-calculator",
-    "version": "1.0.1",
+    "version": "1.0.3",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "android": {
       "package": "com.irshadvali.valcalc",
-      "versionCode": 5000
+      "versionCode": 3
     },
     "ios": {
       "supportsTablet": true,
