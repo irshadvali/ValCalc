@@ -127,10 +127,10 @@ jobs:
               signing = """
               signingConfigs {
                   githubUpload {
-                      storeFile file(project.property("MYAPP_UPLOAD_STORE_FILE"))
-                      storePassword project.property("MYAPP_UPLOAD_STORE_PASSWORD")
-                      keyAlias project.property("MYAPP_UPLOAD_KEY_ALIAS")
-                      keyPassword project.property("MYAPP_UPLOAD_KEY_PASSWORD")
+                      storeFile file(project.property("ANDROID_KEYSTORE_BASE64"))
+                      storePassword project.property("ANDROID_KEYSTORE_PASSWORD")
+                      keyAlias project.property("ANDROID_KEY_ALIAS")
+                      keyPassword project.property("ANDROID_KEY_PASSWORD")
                   }
               }
 
