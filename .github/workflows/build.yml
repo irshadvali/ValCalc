@@ -4,7 +4,7 @@ name: Android Build and Google Play Upload
 on:
   push:
     branches:
-      - main
+      - newYml
 
   workflow_dispatch:
 
