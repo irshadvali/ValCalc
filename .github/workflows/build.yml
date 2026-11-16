@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - newYml
-
   workflow_dispatch:
 
 permissions:
@@ -25,7 +24,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       # 3. Setup Java
@@ -46,10 +45,7 @@ jobs:
 
           if [ ! -d android ]; then
             echo "Generating Android project using Expo Prebuild..."
-
-            npx expo prebuild \
-              --platform android \
-              --no-install
+            npx expo prebuild --platform android --no-install
           fi
 
           test -f android/gradlew
@@ -57,7 +53,7 @@ jobs:
 
           echo "Android project ready."
 
-      # 6. Configure Android signing
+      # 6. Decode and verify Android upload keystore
       - name: Configure Android signing
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -67,36 +63,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Validate secrets
-          test -n "$KEYSTORE" || {
-            echo "ERROR: ANDROID_KEYSTORE_BASE64 missing"
-            exit 1
-          }
+          test -n "$KEYSTORE" || { echo "ANDROID_KEYSTORE_BASE64 missing"; exit 1; }
+          test -n "$STORE_PASSWORD" || { echo "ANDROID_KEYSTORE_PASSWORD missing"; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "ANDROID_KEY_ALIAS missing"; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo "ANDROID_KEY_PASSWORD missing"; exit 1; }
 
-          test -n "$STORE_PASSWORD" || {
-            echo "ERROR: ANDROID_KEYSTORE_PASSWORD missing"
-            exit 1
-          }
-
-          test -n "$KEY_ALIAS" || {
-            echo "ERROR: ANDROID_KEY_ALIAS missing"
-            exit 1
-          }
-
-          test -n "$KEY_PASSWORD" || {
-            echo "ERROR: ANDROID_KEY_PASSWORD missing"
-            exit 1
-          }
-
-          # Decode upload keystore
           mkdir -p android/app
 
-          printf '%s' "$KEYSTORE" |
-            base64 --decode > android/app/upload-keystore.jks
+          printf '%s' "$KEYSTORE" | base64 --decode > android/app/upload-keystore.jks
 
           test -s android/app/upload-keystore.jks
 
-          # Verify keystore and alias
           keytool -list \
             -keystore android/app/upload-keystore.jks \
             -storepass "$STORE_PASSWORD" \
@@ -104,7 +81,7 @@ jobs:
 
           echo "Android keystore verified."
 
-      # 7. Configure release signing
+      # 7. Configure release signing automatically
       - name: Configure release signing
         run: |
           set -euo pipefail
@@ -116,43 +93,42 @@ jobs:
           path = Path("android/app/build.gradle")
           content = path.read_text()
 
-          # Add custom upload signing configuration
+          # Locate the Android block
+          android_match = re.search(r'\bandroid\s*\{', content)
+
+          if not android_match:
+              raise SystemExit("ERROR: Android block not found.")
+
+          # Add signing configuration if it does not already exist
           if "githubUpload" not in content:
-
-              match = re.search(r'\bbuildTypes\s*\{', content)
-
-              if not match:
-                  raise SystemExit("ERROR: buildTypes block not found")
-
               signing = """
               signingConfigs {
                   githubUpload {
-                      storeFile file(project.property( ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-                      )))
-                      storePassword project.property(${{ secrets.ANDROID_KEYSTORE_PASSWORD }})
-                      keyAlias project.property(${{ secrets.ANDROID_KEY_ALIAS }})
-                      keyPassword project.property(${{ secrets.ANDROID_KEY_PASSWORD }})
+                      storeFile file("upload-keystore.jks")
+                      storePassword System.getenv("STORE_PASSWORD")
+                      keyAlias System.getenv("KEY_ALIAS")
+                      keyPassword System.getenv("KEY_PASSWORD")
                   }
               }
+              """
 
-          """
+              insert_at = android_match.end()
+              content = content[:insert_at] + "\n" + signing + content[insert_at:]
 
-              content = (
-                  content[:match.start()]
-                  + signing
-                  + content[match.start():]
-              )
-
-          # Find release build type
+          # Locate buildTypes
           build_types = re.search(r'\bbuildTypes\s*\{', content)
 
+          if not build_types:
+              raise SystemExit("ERROR: buildTypes block not found.")
+
+          # Locate release block inside buildTypes
           release = re.search(
               r'\brelease\s*\{',
               content[build_types.end():]
           )
 
           if not release:
-              raise SystemExit("ERROR: release buildType not found")
+              raise SystemExit("ERROR: release block not found.")
 
           start = build_types.end() + release.start()
           opening = content.find("{", start)
@@ -165,28 +141,29 @@ jobs:
                   depth += 1
               elif content[i] == "}":
                   depth -= 1
+
                   if depth == 0:
                       closing = i
                       break
 
           if closing == -1:
-              raise SystemExit("ERROR: Invalid release block")
+              raise SystemExit("ERROR: Invalid release block.")
 
           release_body = content[opening + 1:closing]
 
-          # Replace existing release signing configuration
+          # Remove any existing release signingConfig assignment
           release_body = re.sub(
-              r'^\s*signingConfig\s+signingConfigs\.\w+.*$',
-              '            signingConfig signingConfigs.githubUpload',
+              r'^\s*signingConfig\s+signingConfigs\.\w+\s*$',
+              '',
               release_body,
               flags=re.MULTILINE
           )
 
-          if "signingConfig signingConfigs.githubUpload" not in release_body:
-              release_body = (
-                  '\n            signingConfig signingConfigs.githubUpload\n'
-                  + release_body
-              )
+          # Set upload signing configuration
+          release_body = (
+              "\n                signingConfig signingConfigs.githubUpload\n"
+              + release_body
+          )
 
           content = (
               content[:opening + 1]
@@ -199,7 +176,7 @@ jobs:
           print("Release signing configured successfully.")
           PY
 
-      # 8. Verify signing
+      # 8. Verify signing configuration
       - name: Verify Android signing
         run: |
           set -euo pipefail
@@ -208,17 +185,18 @@ jobs:
 
           grep -q 'githubUpload' android/app/build.gradle
 
-          echo "Keystore exists."
-          echo "Release signing configuration exists."
+          grep -q 'signingConfig signingConfigs.githubUpload' android/app/build.gradle
 
-      # 9. Build Android AAB on GitHub runner
+          echo "Keystore exists."
+          echo "Release signing configuration verified."
+
+      # 9. Build Android AAB
       - name: Build Android AAB
         working-directory: android
         env:
-          ORG_GRADLE_PROJECT_MYAPP_UPLOAD_STORE_FILE: upload-keystore.jks
-          ORG_GRADLE_PROJECT_MYAPP_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ORG_GRADLE_PROJECT_MYAPP_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ORG_GRADLE_PROJECT_MYAPP_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -228,7 +206,7 @@ jobs:
             --no-daemon \
             --stacktrace
 
-      # 10. Verify AAB
+      # 10. Verify generated AAB
       - name: Verify generated AAB
         run: |
           set -euo pipefail
