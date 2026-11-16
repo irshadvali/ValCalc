@@ -3,7 +3,7 @@
     "name": "Simple Vali Calculator",
     "slug": "simple-vali-calculator",
     "icon": "./assets/images/icon.png",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "splash": {
@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.irshadvali.valcalc",
-      "versionCode": 4,
+      "versionCode": 5,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#003BCE"
