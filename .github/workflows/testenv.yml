@@ -27,11 +27,11 @@ jobs:
 
       - name: Check environment
         env:
-          API_URL: ${{ env.API_URL }}
-          MY_BASE_URL: ${{ vars.MY_BASE_URL }}
-        #   EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+            ENVIRONMENT: ${{ vars.ENVIRONMENT }}
+            API_URL: ${{ vars.API_URL }}
+            MY_BASE_URL: ${{ vars.MY_BASE_URL }}
         run: |
-          echo "Building React Native application"
-          echo "Environment: ${{ vars.ENVIRONMENT }}"
-          echo "API URL: $API_URL"
-          echo "MY_BASE_URL: $MY_BASE_URL"
+           echo "Building React Native application"
+           echo "Environment: $ENVIRONMENT"
+           echo "API URL: $API_URL"
+           echo "MY_BASE_URL: $MY_BASE_URL"
