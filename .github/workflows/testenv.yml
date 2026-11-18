@@ -1,0 +1,38 @@
+
+name: React Native Environment Demo
+
+on:
+  push:
+    branches:
+      - envDemo
+  workflow_dispatch:
+
+jobs:
+  android-build:
+    name: Android Build
+    runs-on: ubuntu-latest
+
+    environment: Staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check environment
+        env:
+          API_URL: ${{ vars.API_URL }}
+          MY_BASE_URL: ${{ vars.MY_BASE_URL }}
+        #   EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          echo "Building React Native application"
+          echo "Environment: Staging"
+          echo "API URL: $API_URL"
+          echo "MY_BASE_URL: $MY_BASE_URL"

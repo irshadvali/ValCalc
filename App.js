@@ -18,6 +18,9 @@ const rows = [
 ];
 
 export default function App() {
+  const API_URL1 = process.env.API_URL;
+
+console.log("API URL:", API_URL1);
   const [display, setDisplay] = useState('0');
   const [storedValue, setStoredValue] = useState(null);
   const [operator, setOperator] = useState(null);
