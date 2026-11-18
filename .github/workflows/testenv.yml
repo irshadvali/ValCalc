@@ -1,4 +1,3 @@
-
 name: React Native Environment Demo
 
 on:
@@ -28,11 +27,11 @@ jobs:
 
       - name: Check environment
         env:
-          API_URL: ${{ vars.API_URL }}
+          API_URL: ${{ env.API_URL }}
           MY_BASE_URL: ${{ vars.MY_BASE_URL }}
         #   EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           echo "Building React Native application"
-          echo "Environment: Staging"
+          echo "Environment: ${{ vars.ENVIRONMENT }}"
           echo "API URL: $API_URL"
           echo "MY_BASE_URL: $MY_BASE_URL"
