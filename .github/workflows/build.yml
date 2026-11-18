@@ -15,7 +15,8 @@ jobs:
   android-build:
     name: Build Android AAB and Upload to Google Play
     runs-on: ubuntu-latest
-
+  
+    environment: production
     steps:
       # 1. Checkout source code
       - name: Checkout repository

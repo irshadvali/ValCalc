@@ -140,7 +140,8 @@ export default function App() {
       <StatusBar barStyle="light-content" backgroundColor="#111111" />
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.heading}>Calculator {MY_BASE_URL}</Text>
+          <Text style={styles.heading}>Calculator</Text>
+          <Text>{MY_BASE_URL}</Text>
           <Text style={styles.subheading}>Simple • Fast • Easy</Text>
         </View>
 
