@@ -18,9 +18,9 @@ const rows = [
 ];
 
 export default function App() {
-  const API_URL1 = process.env.API_URL;
+  const MY_BASE_URL = process.env.MY_BASE_URL;
 
-console.log("API URL:", API_URL1);
+
   const [display, setDisplay] = useState('0');
   const [storedValue, setStoredValue] = useState(null);
   const [operator, setOperator] = useState(null);
@@ -140,7 +140,7 @@ console.log("API URL:", API_URL1);
       <StatusBar barStyle="light-content" backgroundColor="#111111" />
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.heading}>Calculator</Text>
+          <Text style={styles.heading}>Calculator {MY_BASE_URL}</Text>
           <Text style={styles.subheading}>Simple • Fast • Easy</Text>
         </View>
 
